@@ -334,6 +334,9 @@
       </div>
       <div class="page-actions">
         <div class="search-box"><span>🔍</span><input type="text" id="poSearch" placeholder="Search PO, supplier..." oninput="renderPOList()"></div>
+        <select id="poSupplierFilter" class="form-select" style="width:auto;min-width:180px;padding:7px 11px;font-size:13.5px;font-weight:600" onchange="renderPOList()">
+          <option value="">All Suppliers</option>
+        </select>
         <button class="btn btn-primary" onclick="openCreatePO()">＋ New Purchase Order</button>
       </div>
     </div>
@@ -670,7 +673,10 @@
         <p class="page-subtitle"><span id="settleCount">0</span> payment(s) recorded</p>
       </div>
       <div class="page-actions">
-        <div class="search-box"><span>🔍</span><input type="text" id="settleSearch" placeholder="Search supplier, reference..." oninput="renderSettlements()"></div>
+        <div class="search-box"><span>🔍</span><input type="text" id="settleSearch" placeholder="Search supplier, reference, PO..." oninput="renderSettlements()"></div>
+        <select id="settleSupplierFilter" class="form-select" style="width:auto;min-width:180px;padding:7px 11px;font-size:13.5px;font-weight:600" onchange="renderSettlements()">
+          <option value="">All Suppliers</option>
+        </select>
         <button class="btn btn-primary" onclick="openSettlementModal()">＋ Record Settlement</button>
       </div>
     </div>
@@ -837,8 +843,8 @@
       </div>
       <div class="page-actions">
         <div class="search-box"><span>🔍</span><input type="text" id="productSearch" placeholder="Search name, category, SKU..." oninput="renderProducts()"></div>
-        <select id="productCategoryFilter" class="form-select" style="width:auto;min-width:170px;padding:7px 11px;font-size:13.5px;font-weight:600" onchange="renderProducts()">
-          <option value="">All Categories</option>
+        <select id="productSupplierFilter" class="form-select" style="width:auto;min-width:180px;padding:7px 11px;font-size:13.5px;font-weight:600" onchange="renderProducts()">
+          <option value="">All Suppliers</option>
         </select>
         <button class="btn btn-secondary" onclick="openBulkImport()">📥 Bulk Import</button>
         <button class="btn btn-primary" onclick="openProductModal()">＋ Add Product</button>
@@ -1786,24 +1792,22 @@ function populateSupplierDropdowns(){
 // ═══════════════════════════════════════════════════════════════════
 // PRODUCTS
 // ═══════════════════════════════════════════════════════════════════
-function populateProductCategoryFilter(){
-  const select=document.getElementById('productCategoryFilter');
+function populateSupplierFilter(selectId){
+  const select=document.getElementById(selectId);
   if(!select)return;
   const current=select.value;
-  const settingsCats=getCategories();
-  const productCats=load(KEYS.products).map(p=>p.category).filter(Boolean);
-  const allCats=[...new Set([...settingsCats,...productCats])].sort();
-  select.innerHTML='<option value="">All Categories</option>'+
-    allCats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
-  // restore previous selection if still valid
-  if(allCats.includes(current))select.value=current;
+  const suppliers=load(KEYS.suppliers).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  select.innerHTML='<option value="">All Suppliers</option>'+
+    suppliers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  // preserve previous selection if still valid
+  if(suppliers.find(s=>s.id===current))select.value=current;
 }
 function renderProducts(){
-  populateProductCategoryFilter();
+  populateSupplierFilter('productSupplierFilter');
   const q=(document.getElementById('productSearch')?.value||'').toLowerCase();
-  const catFilter=document.getElementById('productCategoryFilter')?.value||'';
+  const supFilter=document.getElementById('productSupplierFilter')?.value||'';
   let prods=load(KEYS.products).filter(p=>{
-    if(catFilter && (p.category||'')!==catFilter)return false;
+    if(supFilter && (p.supplierId||'')!==supFilter)return false;
     if(!q)return true;
     return (p.name||'').toLowerCase().includes(q)||(p.category||'').toLowerCase().includes(q)||(p.sku||'').toLowerCase().includes(q);
   });
@@ -2042,8 +2046,11 @@ function setPOFilter(f){poFilter=f;document.querySelectorAll('.filter-pills .pil
 function genPOId(n){return`PO/${new Date().getFullYear()}/${String(n).padStart(5,'0')}`}
 
 function renderPOList(){
+  populateSupplierFilter('poSupplierFilter');
   const q=(document.getElementById('poSearch')?.value||'').toLowerCase();
+  const supFilter=document.getElementById('poSupplierFilter')?.value||'';
   let pos=load(KEYS.pos);
+  if(supFilter)pos=pos.filter(p=>p.supplierId===supFilter);
   if(poFilter==='unpaid'){
     pos=pos.filter(p=>p.status!=='draft' && getPOPaymentStatus(p).isUnpaid);
   }else if(poFilter==='partial'){
@@ -2812,14 +2819,33 @@ function setSettleFilter(m){
 }
 
 function renderSettlements(){
-  const q=(document.getElementById('settleSearch')?.value||'').toLowerCase();
-  let settles=load(KEYS.settlements).filter(s=>!q||
-    (s.id||'').toLowerCase().includes(q)||(s.supplierName||'').toLowerCase().includes(q)||
-    (s.poId||'').toLowerCase().includes(q)||(s.reference||'').toLowerCase().includes(q));
+  populateSupplierFilter('settleSupplierFilter');
+  const q=(document.getElementById('settleSearch')?.value||'').toLowerCase().trim();
+  const supFilter=document.getElementById('settleSupplierFilter')?.value||'';
+  let settles=load(KEYS.settlements).filter(s=>{
+    if(supFilter && (s.supplierId||'')!==supFilter)return false;
+    if(!q)return true;
+    return (s.id||'').toLowerCase().includes(q)||
+           (s.supplierName||'').toLowerCase().includes(q)||
+           (s.poId||'').toLowerCase().includes(q)||
+           (s.reference||'').toLowerCase().includes(q)||
+           (s.method||'').toLowerCase().includes(q)||
+           (s.notes||'').toLowerCase().includes(q);
+  });
   if(settleMethodFilter!=='all')settles=settles.filter(s=>s.method===settleMethodFilter);
   settles.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
   document.getElementById('settleCount').textContent=settles.length;
-  document.getElementById('settleEmpty').style.display=settles.length?'none':'block';
+  // Improved empty state: tell the user WHY the list is empty
+  const empty=document.getElementById('settleEmpty');
+  const hasFilter=q||supFilter||settleMethodFilter!=='all';
+  if(settles.length){
+    empty.style.display='none';
+  }else{
+    empty.style.display='block';
+    empty.innerHTML=hasFilter
+      ?'<div class="empty-state-icon">🔍</div><div class="empty-state-title">No matching settlements</div><div>Try clearing the search or filters above.</div>'
+      :'<div class="empty-state-icon">💳</div><div class="empty-state-title">No settlements recorded yet</div><div>Record payments made to suppliers here.</div>';
+  }
 
   const total=settles.reduce((a,s)=>a+Number(s.amount||0),0);
   const today_total=settles.filter(s=>s.date===today()).reduce((a,s)=>a+Number(s.amount||0),0);
